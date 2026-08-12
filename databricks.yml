@@ -6,7 +6,12 @@ artifacts:
   default:
     type: whl
     path: .
-    build: python -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
+    build: python3 -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
+
+sync:
+  include:
+    # `dist/` is normally ignored, but the serverless Job environment installs this wheel.
+    - dist/*.whl
 
 variables:
   catalog:
@@ -22,9 +27,9 @@ variables:
     default: job_copilot
   vector_search_endpoint:
     default: job-copilot-vs
-  model_endpoint:
-    description: Existing foundation-model serving endpoint with tool calling.
-    default: databricks-claude-sonnet-4-5
+  model_service:
+    description: Fully qualified Unity AI Gateway model service used by the App.
+    default: system.ai.gemma-3-12b
   min_cu:
     default: 0.5
   max_cu:
@@ -56,20 +61,19 @@ resources:
           environment_key: default
           python_wheel_task:
             package_name: ai-job-hunting-copilot
-            entry_point: job_copilot.pipeline_job
+            entry_point: ingest_remoteok
             parameters:
               - --catalog
               - ${var.catalog}
               - --schema
               - ${var.schema}
-          libraries:
-            - whl: ./dist/*.whl
       environments:
         - environment_key: default
           spec:
             environment_version: '2'
             dependencies:
               - httpx>=0.27.0
+              - ${workspace.file_path}/dist/ai_job_hunting_copilot-0.1.1-py3-none-any.whl
 
   postgres_projects:
     job_copilot_project:
@@ -118,23 +122,23 @@ resources:
         pipeline_type: TRIGGERED
         embedding_source_columns:
           - name: search_text
-            embedding_model_endpoint_name: databricks-gte-large-en
+            embedding_model_endpoint_name: databricks-bge-large-en
 
   apps:
     frontend:
       name: ${bundle.target}-job-copilot
       description: AI Job Hunting Copilot Streamlit frontend
-      source_code_path: .
+      source_code_path: ./apps/frontend
       config:
         command:
           - sh
           - -c
-          - PYTHONPATH=src python -m job_copilot.migrate && PYTHONPATH=src streamlit run src/job_copilot/app.py --server.port 8000 --server.address 0.0.0.0
+          - MODEL_SERVICE=${var.model_service} PYTHONPATH=src python -m job_copilot.migrate && MODEL_SERVICE=${var.model_service} PYTHONPATH=src streamlit run src/job_copilot/app.py --server.port 8000 --server.address 0.0.0.0
         env:
           - name: VECTOR_SEARCH_INDEX
             value_from: ai-search
-          - name: SERVING_ENDPOINT
-            value_from: model
+          - name: LAKEBASE_ENDPOINT_NAME
+            value_from: lakebase
       resources:
         - name: lakebase
           postgres:
@@ -146,19 +150,18 @@ resources:
             securable_full_name: ${resources.vector_search_indexes.job_documents.name}
             securable_type: TABLE
             permission: SELECT
-        - name: model
-          serving_endpoint:
-            name: ${var.model_endpoint}
-            permission: CAN_QUERY
     mcp:
       name: mcp-${bundle.target}-job-copilot
       description: Private MCP tool server for AI Job Hunting Copilot
-      source_code_path: .
+      source_code_path: ./apps/mcp
       config:
         command:
           - sh
           - -c
           - PYTHONPATH=src python -m job_copilot.mcp_server
+        env:
+          - name: LAKEBASE_ENDPOINT_NAME
+            value_from: lakebase
       resources:
         - name: lakebase
           postgres:
