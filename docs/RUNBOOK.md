@@ -7,13 +7,13 @@ This guide is for a personal **Databricks Free Edition** workspace. Follow it in
 You will:
 
 1. Sign the Databricks CLI on your WSL computer into your workspace.
-2. Tell the project which Unity Catalog catalog and model endpoint to use.
+2. Tell the project which Unity Catalog catalog and AI Gateway model service to use.
 3. Create the catalog and schema, then deploy the Lakebase database and ingestion Job.
 4. Run the job once to create the job-data tables.
 5. Deploy AI Search and the two Apps.
 6. Use the Databricks UI to test and share the frontend.
 
-The CLI creates the resources described by `databricks.yml`. The Databricks UI is where you choose the existing catalog and model, inspect Jobs and tables, view AI Search and Lakebase, read logs, and open the running App. You do not need a personal-access token, database password, company account, workspace administrator, or Accounts Console.
+The CLI creates the resources described by `databricks.yml`. The Databricks UI is where you create or choose the catalog, inspect Jobs and tables, view AI Search and Lakebase, read logs, and open the running App. You do not need a personal-access token, database password, company account, workspace administrator, or Accounts Console.
 
 ## Before you begin
 
@@ -34,7 +34,8 @@ Open your personal workspace in the browser. You need these items available in t
 - **Catalog** (Unity Catalog)
 - **Workflows** (Jobs)
 - **Apps**
-- **Serving** (a ready chat-model endpoint and `databricks-gte-large-en` embedding endpoint)
+- **Serving** (only needed later to confirm the AI Search embedding endpoint)
+- **AI Gateway** (Databricks-managed chat models)
 - **Lakebase** / Postgres projects
 - **AI Search** / Vector Search
 
@@ -172,13 +173,23 @@ catalog: the catalog you chose or created, for example job_copilot_catalog
 schema: job_copilot
 ```
 
-### 6. Find model endpoints
+### 6. Choose the chat model service — do not create a Serving endpoint
 
-1. Open **Serving** in the sidebar.
-2. Find a chat model endpoint with status **READY**; copy its exact name.
-3. Find `databricks-gte-large-en` with status **READY**. If it is absent, find another embedding endpoint and copy its exact name.
+Databricks changed this UI: a Databricks-managed chat model is now a **Unity AI Gateway model service**, not a classic **Serving endpoint**. The banner you saw is expected.
 
-The default chat endpoint in this repository is `databricks-claude-sonnet-4-5`, but you must use it only when it is visible and READY in your own workspace.
+For this project use this exact name:
+
+```text
+system.ai.gemma-3-12b
+```
+
+There is nothing to create, select, or copy in the **Create endpoint** dialog. Close that dialog without saving an endpoint. `system.ai.gemma-3-12b` is a Databricks-provided service and is available to account users by default when Unity AI Gateway is available in the workspace.
+
+You may see only **Genie** on the AI Gateway landing page. Genie is a different AI product; it is not the chat model for this application. You do not need to create a Genie space.
+
+If you want to verify the model visually, open **Catalog** and look for catalog `system`, schema `ai`, then `gemma-3-12b`. If the `system` catalog or the model is not available, stop here: this workspace does not currently have Unity AI Gateway model-service access. Do not try to recreate it as a custom endpoint.
+
+Keep the embedding endpoint separate: AI Search uses the preconfigured Foundation Model API endpoint `databricks-bge-large-en`, which is the endpoint form of `system.ai.bge-large-en`. It still uses an endpoint-style name below.
 
 ### 7. Check one-per-account resources
 
@@ -206,7 +217,7 @@ From the repository root in WSL, run:
 
 ```bash
 mkdir -p .databricks/bundle/dev
-nano .databricks/bundle/dev/variables.json
+nano .databricks/bundle/dev/variable-overrides.json
 ```
 
 Paste this JSON and replace the sample values:
@@ -218,7 +229,7 @@ Paste this JSON and replace the sample values:
   "project_id": "ai-job-copilot-nhat",
   "database_name": "job_copilot",
   "vector_search_endpoint": "job-copilot-vs-nhat",
-  "model_endpoint": "databricks-claude-sonnet-4-5"
+  "model_service": "system.ai.gemma-3-12b"
 }
 ```
 
@@ -234,7 +245,7 @@ Open [databricks.yml](../databricks.yml) and find:
 embedding_model_endpoint_name: databricks-gte-large-en
 ```
 
-Replace only `databricks-gte-large-en` with the READY embedding endpoint from your workspace. Save the file.
+Replace only `databricks-bge-large-en` with the embedding endpoint you selected. Save the file. Do not replace it with `system.ai.bge-large-en`: AI Search currently requires an embedding **endpoint** name here, not an AI Gateway model-service name.
 
 ## What the first deployment creates
 
@@ -244,12 +255,14 @@ When you run the commands below, the bundle creates these resources for you. You
 | --- | --- |
 | Unity Catalog schema | Created manually in step 4: `<catalog>.job_copilot` |
 | Spark ingestion Job | `dev-job-copilot-ingest-remoteok` |
-| Lakebase project | the `project_id` in `variables.json` |
+| Lakebase project | the `project_id` in `variable-overrides.json` |
 | Lakebase database | `job_copilot` by default |
-| AI Search endpoint | the `vector_search_endpoint` in `variables.json` |
+| AI Search endpoint | the `vector_search_endpoint` in `variable-overrides.json` |
 | Delta Sync AI Search index | `<workspace-catalog>.job_copilot.job_documents_index` |
 | Frontend App | `dev-job-copilot` |
 | Private MCP App | `mcp-dev-job-copilot` |
+
+The bundle does **not** create a chat-model endpoint. The frontend calls the ready-made AI Gateway model service directly using its dedicated App identity.
 
 ## Deploy: first pass — create data infrastructure
 
@@ -337,6 +350,8 @@ In the UI, open **Apps**. You should see:
 - `mcp-dev-job-copilot` — the private MCP tool server.
 
 Open `dev-job-copilot`. If it does not start, open **Logs** in the App page and copy the first error, not only the last line.
+
+If the chat feature later reports `403`, `EXECUTE`, or `model service not found`, open **Catalog** → `system` → `ai` → `gemma-3-12b` and use **Permissions** to give the `dev-job-copilot` App service principal `EXECUTE`. In a personal Free Edition workspace this normally is already granted; do this only for that error.
 
 ## Test it in the UI
 
@@ -427,7 +442,8 @@ databricks vector-search-indexes sync-index <catalog>.job_copilot.job_documents_
 - **RemoteOK ingestion fails with a network error:** Free Edition has restricted outbound networking. Save the Job output and use it as evidence for the capstone; to make the app run, the ingestion source must be changed to an allowed API or a committed fixture must be used for demonstration.
 - **Lakebase already has a project:** Free Edition permits one project. Either delete the old personal project only if you no longer need it, or modify this project's variables and bundle to reuse it. Do not delete data merely to retry a deployment.
 - **AI Search endpoint already exists:** Free Edition permits one endpoint. Reuse its name by setting `vector_search_endpoint` to that endpoint name, if it is suitable and you understand it will be shared.
-- **Model endpoint is unavailable:** Choose a READY endpoint from Serving, update `model_endpoint` in `variables.json`, and update the embedding endpoint in `databricks.yml` if necessary.
+- **`system.ai.gemma-3-12b` is absent:** Do not create a classic Serving endpoint. This workspace lacks the required AI Gateway model-service access. The app's search and Lakebase features can still be deployed, but chat cannot work until this Databricks feature is available.
+- **Chat returns a permission error:** In Catalog, open `system.ai.gemma-3-12b` and grant the frontend App service principal `EXECUTE`, then restart the frontend App.
 - **Apps stop after a day:** This is expected on Free Edition. Open Apps and click Start or redeploy with `databricks bundle run frontend -t dev` and `databricks bundle run mcp -t dev`.
 
 ## Why CLI is used here
