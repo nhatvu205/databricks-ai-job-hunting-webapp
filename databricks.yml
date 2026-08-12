@@ -1,0 +1,176 @@
+bundle:
+  name: ai-job-hunting-copilot
+  engine: direct
+
+artifacts:
+  default:
+    type: whl
+    path: .
+    build: python -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
+
+variables:
+  catalog:
+    description: Unity Catalog catalog used for Delta tables and AI Search.
+  schema:
+    description: Schema created for the capstone.
+    default: job_copilot
+  project_id:
+    description: Lowercase, hyphen-delimited Lakebase project identifier.
+    default: ai-job-copilot
+  database_name:
+    description: Lakebase database name for user state.
+    default: job_copilot
+  vector_search_endpoint:
+    default: job-copilot-vs
+  model_endpoint:
+    description: Existing foundation-model serving endpoint with tool calling.
+    default: databricks-claude-sonnet-4-5
+  min_cu:
+    default: 0.5
+  max_cu:
+    default: 2.0
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+
+resources:
+  schemas:
+    job_copilot:
+      name: ${var.schema}
+      catalog_name: ${var.catalog}
+      comment: AI Job Hunting Copilot governed job corpus
+
+  jobs:
+    ingest_remoteok:
+      name: ${bundle.target}-job-copilot-ingest-remoteok
+      description: Daily RemoteOK ingestion, normalization, and Delta upserts.
+      schedule:
+        quartz_cron_expression: 0 0 7 * * ?
+        timezone_id: Asia/Ho_Chi_Minh
+        pause_status: PAUSED
+      tasks:
+        - task_key: ingest
+          job_cluster_key: serverless
+          python_wheel_task:
+            package_name: ai-job-hunting-copilot
+            entry_point: job_copilot.pipeline_job
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${var.schema}
+          libraries:
+            - whl: ./dist/*.whl
+      job_clusters:
+        - job_cluster_key: serverless
+          new_cluster:
+            spark_version: 16.4.x-scala2.12
+            num_workers: 1
+
+  postgres_projects:
+    job_copilot:
+      project_id: ${var.project_id}
+      display_name: AI Job Hunting Copilot
+      pg_version: 17
+      default_endpoint_settings:
+        autoscaling_limit_min_cu: ${var.min_cu}
+        autoscaling_limit_max_cu: ${var.max_cu}
+        suspend_timeout_duration: 300s
+
+  postgres_branches:
+    production:
+      branch_id: production
+      parent: ${resources.postgres_projects.job_copilot.name}
+      no_expiry: true
+      is_protected: true
+      replace_existing: true
+
+  postgres_roles:
+    app_owner:
+      role_id: job-copilot-app
+      parent: ${resources.postgres_branches.production.name}
+      postgres_role: job_copilot_app
+
+  postgres_databases:
+    app_db:
+      database_id: job-copilot-db
+      parent: ${resources.postgres_branches.production.name}
+      postgres_database: ${var.database_name}
+      role: ${resources.postgres_roles.app_owner.id}
+
+  vector_search_endpoints:
+    job_copilot:
+      name: ${var.vector_search_endpoint}
+      endpoint_type: STANDARD
+
+  vector_search_indexes:
+    job_documents:
+      name: ${var.catalog}.${var.schema}.job_documents_index
+      endpoint_name: ${resources.vector_search_endpoints.job_copilot.name}
+      primary_key: posting_id
+      index_type: DELTA_SYNC
+      delta_sync_index_spec:
+        source_table: ${var.catalog}.${var.schema}.gold_job_documents
+        pipeline_type: TRIGGERED
+        embedding_source_columns:
+          - name: search_text
+            embedding_model_endpoint_name: databricks-gte-large-en
+
+  apps:
+    frontend:
+      name: ${bundle.target}-job-copilot
+      description: AI Job Hunting Copilot Streamlit frontend
+      source_code_path: .
+      config:
+        command:
+          - sh
+          - -c
+          - PYTHONPATH=src python -m job_copilot.migrate && PYTHONPATH=src streamlit run src/job_copilot/app.py --server.port 8000 --server.address 0.0.0.0
+        env:
+          - name: VECTOR_SEARCH_INDEX
+            valueFrom: ai-search
+          - name: SERVING_ENDPOINT
+            valueFrom: model
+      resources:
+        - name: lakebase
+          postgres:
+            branch: ${resources.postgres_branches.production.name}
+            database: ${resources.postgres_databases.app_db.name}
+            permission: CAN_CONNECT_AND_CREATE
+        - name: ai-search
+          uc_securable:
+            securable_full_name: ${resources.vector_search_indexes.job_documents.name}
+            securable_type: TABLE
+            permission: SELECT
+        - name: model
+          serving_endpoint:
+            name: ${var.model_endpoint}
+            permission: CAN_QUERY
+    mcp:
+      name: mcp-${bundle.target}-job-copilot
+      description: Private MCP tool server for AI Job Hunting Copilot
+      source_code_path: .
+      config:
+        command:
+          - sh
+          - -c
+          - PYTHONPATH=src python -m job_copilot.mcp_server
+      resources:
+        - name: lakebase
+          postgres:
+            branch: ${resources.postgres_branches.production.name}
+            database: ${resources.postgres_databases.app_db.name}
+            permission: CAN_CONNECT_AND_CREATE
+        - name: ai-search
+          uc_securable:
+            securable_full_name: ${resources.vector_search_indexes.job_documents.name}
+            securable_type: TABLE
+            permission: SELECT
