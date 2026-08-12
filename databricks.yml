@@ -42,12 +42,6 @@ targets:
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
 
 resources:
-  schemas:
-    job_copilot:
-      name: ${var.schema}
-      catalog_name: ${var.catalog}
-      comment: AI Job Hunting Copilot governed job corpus
-
   jobs:
     ingest_remoteok:
       name: ${bundle.target}-job-copilot-ingest-remoteok
@@ -58,7 +52,8 @@ resources:
         pause_status: PAUSED
       tasks:
         - task_key: ingest
-          job_cluster_key: serverless
+          # Free Edition supports serverless compute only.
+          environment_key: default
           python_wheel_task:
             package_name: ai-job-hunting-copilot
             entry_point: job_copilot.pipeline_job
@@ -69,14 +64,15 @@ resources:
               - ${var.schema}
           libraries:
             - whl: ./dist/*.whl
-      job_clusters:
-        - job_cluster_key: serverless
-          new_cluster:
-            spark_version: 16.4.x-scala2.12
-            num_workers: 1
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: '2'
+            dependencies:
+              - httpx>=0.27.0
 
   postgres_projects:
-    job_copilot:
+    job_copilot_project:
       project_id: ${var.project_id}
       display_name: AI Job Hunting Copilot
       pg_version: 17
@@ -88,7 +84,7 @@ resources:
   postgres_branches:
     production:
       branch_id: production
-      parent: ${resources.postgres_projects.job_copilot.name}
+      parent: ${resources.postgres_projects.job_copilot_project.name}
       no_expiry: true
       is_protected: true
       replace_existing: true
@@ -107,14 +103,14 @@ resources:
       role: ${resources.postgres_roles.app_owner.id}
 
   vector_search_endpoints:
-    job_copilot:
+    job_copilot_endpoint:
       name: ${var.vector_search_endpoint}
       endpoint_type: STANDARD
 
   vector_search_indexes:
     job_documents:
       name: ${var.catalog}.${var.schema}.job_documents_index
-      endpoint_name: ${resources.vector_search_endpoints.job_copilot.name}
+      endpoint_name: ${resources.vector_search_endpoints.job_copilot_endpoint.name}
       primary_key: posting_id
       index_type: DELTA_SYNC
       delta_sync_index_spec:
@@ -136,9 +132,9 @@ resources:
           - PYTHONPATH=src python -m job_copilot.migrate && PYTHONPATH=src streamlit run src/job_copilot/app.py --server.port 8000 --server.address 0.0.0.0
         env:
           - name: VECTOR_SEARCH_INDEX
-            valueFrom: ai-search
+            value_from: ai-search
           - name: SERVING_ENDPOINT
-            valueFrom: model
+            value_from: model
       resources:
         - name: lakebase
           postgres:
