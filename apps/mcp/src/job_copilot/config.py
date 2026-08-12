@@ -43,3 +43,4 @@ def _lakebase_dsn() -> str:
         }
         return " ".join(f"{key}={value}" for key, value in values.items() if value)
     return "postgresql://postgres:postgres@localhost:5432/job_copilot"
+

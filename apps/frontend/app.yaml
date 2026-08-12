@@ -1,0 +1,13 @@
+command:
+  - sh
+  - -c
+  - python -m job_copilot.migrate && streamlit run src/job_copilot/app.py --server.port "$DATABRICKS_APP_PORT" --server.address 0.0.0.0
+env:
+  - name: PYTHONPATH
+    value: src
+  - name: MODEL_SERVICE
+    value: system.ai.gemma-3-12b
+  - name: VECTOR_SEARCH_INDEX
+    valueFrom: ai-search
+  - name: LAKEBASE_ENDPOINT_NAME
+    valueFrom: lakebase

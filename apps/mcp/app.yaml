@@ -1,0 +1,11 @@
+command:
+  - python
+  - -m
+  - job_copilot.mcp_server
+env:
+  - name: PYTHONPATH
+    value: src
+  - name: VECTOR_SEARCH_INDEX
+    valueFrom: ai-search
+  - name: LAKEBASE_ENDPOINT_NAME
+    valueFrom: lakebase

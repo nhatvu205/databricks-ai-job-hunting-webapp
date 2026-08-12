@@ -157,3 +157,4 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _jsonable(item) for key, item in value.items()}
     return value.isoformat() if hasattr(value, "isoformat") else value
+
