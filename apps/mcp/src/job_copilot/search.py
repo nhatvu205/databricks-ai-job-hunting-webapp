@@ -37,8 +37,6 @@ class AiSearch:
                 "source_url",
                 "tags",
                 "search_text",
-                "salary_min",
-                "salary_max",
                 "posted_at",
             ],
         )
@@ -130,4 +128,3 @@ def _int_or_none(value: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-

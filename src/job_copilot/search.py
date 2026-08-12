@@ -37,8 +37,6 @@ class AiSearch:
                 "source_url",
                 "tags",
                 "search_text",
-                "salary_min",
-                "salary_max",
                 "posted_at",
             ],
         )
