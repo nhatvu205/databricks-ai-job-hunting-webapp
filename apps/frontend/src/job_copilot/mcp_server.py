@@ -88,7 +88,6 @@ async def health() -> dict:
 
 
 async def main() -> None:
-    await service.repository.database.migrate()
     await mcp.run_async(
         transport="http", host="0.0.0.0", port=int(os.getenv("DATABRICKS_APP_PORT", "8000"))
     )
@@ -96,4 +95,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
