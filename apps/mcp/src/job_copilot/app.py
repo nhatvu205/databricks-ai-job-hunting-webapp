@@ -8,7 +8,7 @@ from job_copilot.domain import ApplicationStage, JobSearchFilters, ProfilePatch
 from job_copilot.factory import build_service
 from job_copilot.identity import actor_from_headers
 
-st.set_page_config(page_title="AI Job Hunting Copilot", page_icon="ðŸ’¼", layout="wide")
+st.set_page_config(page_title="AI Job Hunting Copilot", page_icon="💼", layout="wide")
 
 
 def run(coro):
@@ -32,7 +32,7 @@ except PermissionError:
     st.stop()
 
 st.title("AI Job Hunting Copilot")
-st.caption("Jobs via Remote OK Â· saves and updates only your personal Lakebase pipeline")
+st.caption("Jobs via Remote OK · saves and updates only your personal Lakebase pipeline")
 tabs = st.tabs(["Find jobs", "Profile", "Pipeline"])
 
 with tabs[0]:
@@ -51,11 +51,11 @@ with tabs[0]:
         with st.container(border=True):
             st.subheader(job.title)
             st.write(
-                f"{job.company or 'Unknown company'} Â· {job.location or 'Location unavailable'} Â· Match {job.score:.0%}"
+                f"{job.company or 'Unknown company'} · {job.location or 'Location unavailable'} · Match {job.score:.0%}"
             )
             if job.matched_skills:
                 st.caption("Matched: " + ", ".join(job.matched_skills))
-            st.write(job.description[:500] + ("â€¦" if len(job.description) > 500 else ""))
+            st.write(job.description[:500] + ("…" if len(job.description) > 500 else ""))
             left, right = st.columns(2)
             with left:
                 if job.url:

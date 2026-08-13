@@ -29,7 +29,58 @@ def fetch_remoteok_jobs() -> list[dict[str, Any]]:
 
 def clean_html(value: str | None) -> str:
     plain = re.sub(r"<[^>]+>", " ", value or "")
-    return re.sub(r"\s+", " ", html.unescape(plain)).strip()
+    return re.sub(r"\s+", " ", _repair_mojibake(html.unescape(plain))).strip()
+
+
+def _repair_mojibake(value: str) -> str:
+    """Recover UTF-8 sequences that the source decoded as Latin-1 or Windows-1252."""
+    repaired: list[str] = []
+    index = 0
+    while index < len(value):
+        first = _legacy_byte(value[index])
+        width = (
+            2
+            if first is not None and 0xC2 <= first <= 0xDF
+            else 3
+            if first is not None and 0xE0 <= first <= 0xEF
+            else 4
+            if first is not None and 0xF0 <= first <= 0xF4
+            else 1
+        )
+        if width == 1:
+            repaired.append(value[index])
+            index += 1
+            continue
+
+        continuation: list[int] = []
+        for offset in range(1, width):
+            if index + offset >= len(value):
+                break
+            byte = _legacy_byte(value[index + offset])
+            if byte is None or not 0x80 <= byte <= 0xBF:
+                break
+            continuation.append(byte)
+
+        if len(continuation) == width - 1:
+            repaired.append(bytes([first, *continuation]).decode("utf-8"))
+            index += width
+        elif continuation and index + 1 + len(continuation) == len(value):
+            # RemoteOK occasionally truncates the final byte of a symbol in a title.
+            index = len(value)
+        else:
+            repaired.append(value[index])
+            index += 1
+    return "".join(repaired)
+
+
+def _legacy_byte(character: str) -> int | None:
+    codepoint = ord(character)
+    if codepoint <= 0xFF:
+        return codepoint
+    try:
+        return character.encode("cp1252")[0]
+    except UnicodeEncodeError:
+        return None
 
 
 def canonical_job(row: dict[str, Any], ingested_at: datetime) -> dict[str, Any]:
