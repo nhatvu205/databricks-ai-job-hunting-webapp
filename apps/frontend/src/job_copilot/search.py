@@ -45,7 +45,9 @@ class AiSearch:
     @staticmethod
     def _decode(payload: dict[str, Any]) -> list[JobResult]:
         result = payload.get("result", payload)
-        manifest = result.get("manifest", {})
+        # Vector Search returns the manifest beside `result`, while some SDK
+        # response shapes nest it inside `result`. Accept both forms.
+        manifest = payload.get("manifest") or result.get("manifest", {})
         columns = [
             column.get("name", column) if isinstance(column, dict) else column
             for column in manifest.get("columns", [])

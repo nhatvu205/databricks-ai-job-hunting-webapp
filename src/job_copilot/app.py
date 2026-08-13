@@ -44,7 +44,10 @@ with tabs[0]:
         st.session_state["jobs"] = run(
             service().search_jobs(current_actor, query, JobSearchFilters(remote_only=remote_only))
         )
-    for job in st.session_state.get("jobs", []):
+    jobs = st.session_state.get("jobs")
+    if jobs == []:
+        st.info("No matching jobs found. Try a broader role or turn off Remote only.")
+    for job in jobs or []:
         with st.container(border=True):
             st.subheader(job.title)
             st.write(
